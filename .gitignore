@@ -98,3 +98,6 @@ jspm_packages/
 .dolt/
 *.db
 .beads-credential-key
+
+# Backup files
+*.bak

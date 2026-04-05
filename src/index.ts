@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-console.log('Web Search MCP Server starting...');
+console.error('Web Search MCP Server starting...');
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -56,46 +56,19 @@ class WebSearchMCPServer {
         }).optional().describe('Maximum characters per result content (0 = no limit). Usually not needed - content length is automatically optimized.'),
       },
       async (args: unknown) => {
-        console.log(`[MCP] Tool call received: full-web-search`);
-        console.log(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
+        console.error(`[MCP] Tool call received: full-web-search`);
+        console.error(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
 
         try {
           // Convert and validate arguments
           const validatedArgs = this.validateAndConvertArgs(args);
           
-          // Auto-detect model types based on parameter formats
-          // Llama models often send string parameters and struggle with large responses
-          const isLikelyLlama = typeof args === 'object' && args !== null && (
-            ('limit' in args && typeof (args as Record<string, unknown>).limit === 'string') ||
-            ('includeContent' in args && typeof (args as Record<string, unknown>).includeContent === 'string')
-          );
+          console.error(`[MCP] Validated args:`, JSON.stringify(validatedArgs, null, 2));
           
-          // Detect models that handle large responses well (Qwen, Gemma, recent Deepseek)
-          const isLikelyRobustModel = typeof args === 'object' && args !== null && (
-            ('limit' in args && typeof (args as Record<string, unknown>).limit === 'number') &&
-            ('includeContent' in args && typeof (args as Record<string, unknown>).includeContent === 'boolean')
-          );
-          
-          // Only apply auto-limit if maxContentLength is not explicitly set (including 0)
-          const hasExplicitMaxLength = typeof args === 'object' && args !== null && 'maxContentLength' in args;
-          
-          if (!hasExplicitMaxLength && isLikelyLlama) {
-            console.log(`[MCP] Detected potential Llama model (string parameters), applying content length limit`);
-            validatedArgs.maxContentLength = 2000; // Reasonable limit for Llama
-          }
-          
-          // For robust models (Qwen, Gemma, recent Deepseek), remove maxContentLength if it's set to a low value
-          if (isLikelyRobustModel && validatedArgs.maxContentLength && validatedArgs.maxContentLength < 5000) {
-            console.log(`[MCP] Detected robust model (numeric parameters), removing unnecessary content length limit`);
-            validatedArgs.maxContentLength = undefined;
-          }
-          
-          console.log(`[MCP] Validated args:`, JSON.stringify(validatedArgs, null, 2));
-          
-          console.log(`[MCP] Starting web search...`);
+          console.error(`[MCP] Starting web search...`);
           const result = await this.handleWebSearch(validatedArgs);
           
-          console.log(`[MCP] Search completed, found ${result.results.length} results`);
+          console.error(`[MCP] Search completed, found ${result.results.length} results`);
           
           // Format the results as a comprehensive text response
           let responseText = `Search completed for "${result.query}" with ${result.total_results} results:\n\n`;
@@ -141,7 +114,23 @@ class WebSearchMCPServer {
           };
         } catch (error) {
           console.error(`[MCP] Error in tool handler:`, error);
-          throw error;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Web search failed: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
+        } finally {
+          // Ensure browsers are cleaned up to prevent memory leaks
+          try {
+            await this.searchEngine.closeAll();
+          } catch (cleanupError) {
+            console.error(`[MCP] Error during browser cleanup:`, cleanupError);
+          }
         }
       }
     );
@@ -161,8 +150,8 @@ class WebSearchMCPServer {
         }).default(5).describe('Number of search results to return (1-10)'),
       },
       async (args: unknown) => {
-        console.log(`[MCP] Tool call received: get-web-search-summaries`);
-        console.log(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
+        console.error(`[MCP] Tool call received: get-web-search-summaries`);
+        console.error(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
 
         try {
           // Validate arguments
@@ -184,7 +173,7 @@ class WebSearchMCPServer {
             limit = limitValue;
           }
 
-          console.log(`[MCP] Starting web search summaries...`);
+          console.error(`[MCP] Starting web search summaries...`);
           
           try {
             // Use existing search engine to get results with snippets
@@ -203,7 +192,7 @@ class WebSearchMCPServer {
               timestamp: item.timestamp,
             }));
 
-            console.log(`[MCP] Search summaries completed, found ${summaryResults.length} results`);
+            console.error(`[MCP] Search summaries completed, found ${summaryResults.length} results`);
             
             // Format the results as text
             let responseText = `Search summaries for "${obj.query}" with ${summaryResults.length} results:\n\n`;
@@ -234,7 +223,16 @@ class WebSearchMCPServer {
           }
         } catch (error) {
           console.error(`[MCP] Error in get-web-search-summaries tool handler:`, error);
-          throw error;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Search summaries failed: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
         }
       }
     );
@@ -254,8 +252,8 @@ class WebSearchMCPServer {
         }).optional().describe('Maximum characters for the extracted content (0 = no limit, undefined = use default limit). Usually not needed - content length is automatically optimized.'),
       },
       async (args: unknown) => {
-        console.log(`[MCP] Tool call received: get-single-web-page-content`);
-        console.log(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
+        console.error(`[MCP] Tool call received: get-single-web-page-content`);
+        console.error(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
 
         try {
           // Validate arguments
@@ -278,7 +276,7 @@ class WebSearchMCPServer {
             maxContentLength = maxLengthValue === 0 ? undefined : maxLengthValue;
           }
 
-          console.log(`[MCP] Starting single page content extraction for: ${obj.url}`);
+          console.error(`[MCP] Starting single page content extraction for: ${obj.url}`);
           
           // Use existing content extractor to get page content
           const content = await this.contentExtractor.extractContent({
@@ -294,7 +292,7 @@ class WebSearchMCPServer {
           // const contentPreview = content.length > 200 ? content.substring(0, 200) + '...' : content; // Unused for now
           const wordCount = content.split(/\s+/).filter(word => word.length > 0).length;
 
-          console.log(`[MCP] Single page content extraction completed, extracted ${content.length} characters`);
+          console.error(`[MCP] Single page content extraction completed, extracted ${content.length} characters`);
 
           // Format the result as text
           let responseText = `**Page Content from: ${obj.url}**\n\n`;
@@ -318,7 +316,23 @@ class WebSearchMCPServer {
           };
         } catch (error) {
           console.error(`[MCP] Error in get-single-web-page-content tool handler:`, error);
-          throw error;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Single page extraction failed: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          };
+        } finally {
+          // Ensure browsers are cleaned up to prevent memory leaks
+          try {
+            await this.contentExtractor.closeAll();
+          } catch (cleanupError) {
+            console.error(`[MCP] Error during browser cleanup:`, cleanupError);
+          }
         }
       }
     );
@@ -372,7 +386,7 @@ class WebSearchMCPServer {
       // Request up to 2x the limit or at least 5 extra results, capped at 10 (Google's max)
       const searchLimit = includeContent ? Math.min(limit * 2 + 2, 10) : limit;
       
-      console.log(`[web-search-mcp] DEBUG: Requesting ${searchLimit} search results to get ${limit} non-PDF content results`);
+      console.error(`[web-search-mcp] DEBUG: Requesting ${searchLimit} search results to get ${limit} non-PDF content results`);
       
       // Perform the search
       const searchResponse = await this.searchEngine.search({
@@ -484,7 +498,7 @@ class WebSearchMCPServer {
 
     // Graceful shutdown - close browsers when process exits
     process.on('SIGINT', async () => {
-      console.log('Shutting down gracefully...');
+      console.error('Shutting down gracefully...');
       try {
         await Promise.all([
           this.contentExtractor.closeAll(),
@@ -497,7 +511,7 @@ class WebSearchMCPServer {
     });
 
     process.on('SIGTERM', async () => {
-      console.log('Shutting down gracefully...');
+      console.error('Shutting down gracefully...');
       try {
         await Promise.all([
           this.contentExtractor.closeAll(),
@@ -511,14 +525,14 @@ class WebSearchMCPServer {
   }
 
   async run(): Promise<void> {
-    console.log('Setting up MCP server...');
+    console.error('Setting up MCP server...');
     const transport = new StdioServerTransport();
     
-    console.log('Connecting to transport...');
+    console.error('Connecting to transport...');
     await this.server.connect(transport);
-    console.log('Web Search MCP Server started');
-    console.log('Server timestamp:', new Date().toISOString());
-    console.log('Waiting for MCP messages...');
+    console.error('Web Search MCP Server started');
+    console.error('Server timestamp:', new Date().toISOString());
+    console.error('Waiting for MCP messages...');
   }
 }
 
