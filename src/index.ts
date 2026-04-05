@@ -55,16 +55,13 @@ class WebSearchMCPServer {
           return num;
         }).optional().describe('Maximum characters per result content (0 = no limit). Usually not needed - content length is automatically optimized.'),
       },
+      // Args are already validated and transformed by the Zod schema above
       async (args: unknown) => {
+        const validatedArgs = args as WebSearchToolInput & { maxContentLength?: number };
         console.error(`[MCP] Tool call received: full-web-search`);
-        console.error(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
+        console.error(`[MCP] Validated args:`, JSON.stringify(validatedArgs, null, 2));
 
         try {
-          // Convert and validate arguments
-          const validatedArgs = this.validateAndConvertArgs(args);
-          
-          console.error(`[MCP] Validated args:`, JSON.stringify(validatedArgs, null, 2));
-          
           console.error(`[MCP] Starting web search...`);
           const result = await this.handleWebSearch(validatedArgs);
           
@@ -149,36 +146,21 @@ class WebSearchMCPServer {
           return num;
         }).default(5).describe('Number of search results to return (1-10)'),
       },
+      // Args are already validated and transformed by the Zod schema above
       async (args: unknown) => {
+        const validatedArgs = args as Record<string, unknown>;
+        const query = validatedArgs.query as string;
+        const limit = validatedArgs.limit as number;
+
         console.error(`[MCP] Tool call received: get-web-search-summaries`);
-        console.error(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
+        console.error(`[MCP] Validated args:`, JSON.stringify(validatedArgs, null, 2));
 
         try {
-          // Validate arguments
-          if (typeof args !== 'object' || args === null) {
-            throw new Error('Invalid arguments: args must be an object');
-          }
-          const obj = args as Record<string, unknown>;
-          
-          if (!obj.query || typeof obj.query !== 'string') {
-            throw new Error('Invalid arguments: query is required and must be a string');
-          }
-
-          let limit = 5; // default
-          if (obj.limit !== undefined) {
-            const limitValue = typeof obj.limit === 'string' ? parseInt(obj.limit, 10) : obj.limit;
-            if (typeof limitValue !== 'number' || isNaN(limitValue) || limitValue < 1 || limitValue > 10) {
-              throw new Error('Invalid limit: must be a number between 1 and 10');
-            }
-            limit = limitValue;
-          }
-
           console.error(`[MCP] Starting web search summaries...`);
           
           try {
-            // Use existing search engine to get results with snippets
             const searchResponse = await this.searchEngine.search({
-              query: obj.query,
+              query,
               numResults: limit,
             });
 
@@ -195,7 +177,7 @@ class WebSearchMCPServer {
             console.error(`[MCP] Search summaries completed, found ${summaryResults.length} results`);
             
             // Format the results as text
-            let responseText = `Search summaries for "${obj.query}" with ${summaryResults.length} results:\n\n`;
+            let responseText = `Search summaries for "${query}" with ${summaryResults.length} results:\n\n`;
             
             summaryResults.forEach((summary, i) => {
               responseText += `**${i + 1}. ${summary.title}**\n`;
@@ -251,51 +233,36 @@ class WebSearchMCPServer {
           return num;
         }).optional().describe('Maximum characters for the extracted content (0 = no limit, undefined = use default limit). Usually not needed - content length is automatically optimized.'),
       },
+      // Args are already validated and transformed by the Zod schema above
       async (args: unknown) => {
+        const validatedArgs = args as Record<string, unknown>;
+        const url = validatedArgs.url as string;
+        const rawMaxContentLength = validatedArgs.maxContentLength as number | undefined;
+        // If maxContentLength is 0, treat it as "no limit" (undefined)
+        const maxContentLength = rawMaxContentLength === 0 ? undefined : rawMaxContentLength;
+
         console.error(`[MCP] Tool call received: get-single-web-page-content`);
-        console.error(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
+        console.error(`[MCP] Validated args:`, JSON.stringify(validatedArgs, null, 2));
 
         try {
-          // Validate arguments
-          if (typeof args !== 'object' || args === null) {
-            throw new Error('Invalid arguments: args must be an object');
-          }
-          const obj = args as Record<string, unknown>;
+          console.error(`[MCP] Starting single page content extraction for: ${url}`);
           
-          if (!obj.url || typeof obj.url !== 'string') {
-            throw new Error('Invalid arguments: url is required and must be a string');
-          }
-
-          let maxContentLength: number | undefined;
-          if (obj.maxContentLength !== undefined) {
-            const maxLengthValue = typeof obj.maxContentLength === 'string' ? parseInt(obj.maxContentLength, 10) : obj.maxContentLength;
-            if (typeof maxLengthValue !== 'number' || isNaN(maxLengthValue) || maxLengthValue < 0) {
-              throw new Error('Invalid maxContentLength: must be a non-negative number');
-            }
-            // If maxContentLength is 0, treat it as "no limit" (undefined)
-            maxContentLength = maxLengthValue === 0 ? undefined : maxLengthValue;
-          }
-
-          console.error(`[MCP] Starting single page content extraction for: ${obj.url}`);
-          
-          // Use existing content extractor to get page content
           const content = await this.contentExtractor.extractContent({
-            url: obj.url,
+            url,
             maxContentLength,
           });
 
           // Get page title from URL (simple extraction)
-          const urlObj = new URL(obj.url);
+          const urlObj = new URL(url);
           const title = urlObj.hostname + urlObj.pathname;
 
           // Create content preview and word count
-          // const contentPreview = content.length > 200 ? content.substring(0, 200) + '...' : content; // Unused for now
           const wordCount = content.split(/\s+/).filter(word => word.length > 0).length;
 
           console.error(`[MCP] Single page content extraction completed, extracted ${content.length} characters`);
 
           // Format the result as text
-          let responseText = `**Page Content from: ${obj.url}**\n\n`;
+          let responseText = `**Page Content from: ${url}**\n\n`;
           responseText += `**Title:** ${title}\n`;
           responseText += `**Word Count:** ${wordCount}\n`;
           responseText += `**Content Length:** ${content.length} characters\n\n`;
@@ -338,103 +305,61 @@ class WebSearchMCPServer {
     );
   }
 
-  private validateAndConvertArgs(args: unknown): WebSearchToolInput {
-    if (typeof args !== 'object' || args === null) {
-      throw new Error('Invalid arguments: args must be an object');
-    }
-    const obj = args as Record<string, unknown>;
-    // Ensure query is a string
-    if (!obj.query || typeof obj.query !== 'string') {
-      throw new Error('Invalid arguments: query is required and must be a string');
-    }
-
-    // Convert limit to number if it's a string
-    let limit = 5; // default
-    if (obj.limit !== undefined) {
-      const limitValue = typeof obj.limit === 'string' ? parseInt(obj.limit, 10) : obj.limit;
-      if (typeof limitValue !== 'number' || isNaN(limitValue) || limitValue < 1 || limitValue > 10) {
-        throw new Error('Invalid limit: must be a number between 1 and 10');
-      }
-      limit = limitValue;
-    }
-
-    // Convert includeContent to boolean if it's a string
-    let includeContent = true; // default
-    if (obj.includeContent !== undefined) {
-      if (typeof obj.includeContent === 'string') {
-        includeContent = obj.includeContent.toLowerCase() === 'true';
-      } else {
-        includeContent = Boolean(obj.includeContent);
-      }
-    }
-
-    return {
-      query: obj.query,
-      limit,
-      includeContent,
-    };
-  }
-
-  private async handleWebSearch(input: WebSearchToolInput): Promise<WebSearchToolOutput> {
+  private async handleWebSearch(input: WebSearchToolInput & { maxContentLength?: number }): Promise<WebSearchToolOutput> {
     const startTime = Date.now();
     const { query, limit = 5, includeContent = true } = input;
     
     console.error(`[web-search-mcp] DEBUG: handleWebSearch called with limit=${limit}, includeContent=${includeContent}`);
 
-    try {
-      // Request extra search results to account for potential PDF files that will be skipped
-      // Request up to 2x the limit or at least 5 extra results, capped at 10 (Google's max)
-      const searchLimit = includeContent ? Math.min(limit * 2 + 2, 10) : limit;
-      
-      console.error(`[web-search-mcp] DEBUG: Requesting ${searchLimit} search results to get ${limit} non-PDF content results`);
-      
-      // Perform the search
-      const searchResponse = await this.searchEngine.search({
-        query,
-        numResults: searchLimit,
-      });
-      const searchResults = searchResponse.results;
-      
-      // Log search summary
-      const pdfCount = searchResults.filter(result => isPdfUrl(result.url)).length;
-      const followedCount = searchResults.length - pdfCount;
-      console.error(`[web-search-mcp] DEBUG: Search engine: ${searchResponse.engine}; ${limit} requested/${searchResults.length} obtained; PDF: ${pdfCount}; ${followedCount} followed.`);
+    // Request extra search results to account for potential PDF files that will be skipped
+    // Request up to 2x the limit or at least 5 extra results, capped at 10 (Google's max)
+    const searchLimit = includeContent ? Math.min(limit * 2 + 2, 10) : limit;
+    
+    console.error(`[web-search-mcp] DEBUG: Requesting ${searchLimit} search results to get ${limit} non-PDF content results`);
+    
+    // Perform the search
+    const searchResponse = await this.searchEngine.search({
+      query,
+      numResults: searchLimit,
+    });
+    const searchResults = searchResponse.results;
+    
+    // Log search summary
+    const pdfCount = searchResults.filter(result => isPdfUrl(result.url)).length;
+    const followedCount = searchResults.length - pdfCount;
+    console.error(`[web-search-mcp] DEBUG: Search engine: ${searchResponse.engine}; ${limit} requested/${searchResults.length} obtained; PDF: ${pdfCount}; ${followedCount} followed.`);
 
-      // Extract content from each result if requested, with target count
-      const enhancedResults = includeContent 
-        ? await this.contentExtractor.extractContentForResults(searchResults, limit)
-        : searchResults.slice(0, limit); // If not extracting content, just take the first 'limit' results
+    // Extract content from each result if requested, with target count
+    const enhancedResults = includeContent 
+      ? await this.contentExtractor.extractContentForResults(searchResults, limit)
+      : searchResults.slice(0, limit); // If not extracting content, just take the first 'limit' results
+    
+    // Log extraction summary with failure reasons and generate combined status
+    let combinedStatus = `Search engine: ${searchResponse.engine}; ${limit} result requested/${searchResults.length} obtained; PDF: ${pdfCount}; ${followedCount} followed`;
+    
+    if (includeContent) {
+      const successCount = enhancedResults.filter(r => r.fetchStatus === 'success').length;
+      const failedResults = enhancedResults.filter(r => r.fetchStatus === 'error');
+      const failedCount = failedResults.length;
       
-      // Log extraction summary with failure reasons and generate combined status
-      let combinedStatus = `Search engine: ${searchResponse.engine}; ${limit} result requested/${searchResults.length} obtained; PDF: ${pdfCount}; ${followedCount} followed`;
+      const failureReasons = this.categorizeFailureReasons(failedResults);
+      const failureReasonText = failureReasons.length > 0 ? ` (${failureReasons.join(', ')})` : '';
       
-      if (includeContent) {
-        const successCount = enhancedResults.filter(r => r.fetchStatus === 'success').length;
-        const failedResults = enhancedResults.filter(r => r.fetchStatus === 'error');
-        const failedCount = failedResults.length;
-        
-        const failureReasons = this.categorizeFailureReasons(failedResults);
-        const failureReasonText = failureReasons.length > 0 ? ` (${failureReasons.join(', ')})` : '';
-        
-        console.error(`[web-search-mcp] DEBUG: Links requested: ${limit}; Successfully extracted: ${successCount}; Failed: ${failedCount}${failureReasonText}; Results: ${enhancedResults.length}.`);
-        
-        // Add extraction info to combined status
-        combinedStatus += `; Successfully extracted: ${successCount}; Failed: ${failedCount}; Results: ${enhancedResults.length}`;
-      }
-
-      const searchTime = Date.now() - startTime;
-
-      return {
-        results: enhancedResults,
-        total_results: enhancedResults.length,
-        search_time_ms: searchTime,
-        query,
-        status: combinedStatus,
-      };
-    } catch (error) {
-      console.error('Web search error:', error);
-      throw new Error(`Web search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error(`[web-search-mcp] DEBUG: Links requested: ${limit}; Successfully extracted: ${successCount}; Failed: ${failedCount}${failureReasonText}; Results: ${enhancedResults.length}.`);
+      
+      // Add extraction info to combined status
+      combinedStatus += `; Successfully extracted: ${successCount}; Failed: ${failedCount}; Results: ${enhancedResults.length}`;
     }
+
+    const searchTime = Date.now() - startTime;
+
+    return {
+      results: enhancedResults,
+      total_results: enhancedResults.length,
+      search_time_ms: searchTime,
+      query,
+      status: combinedStatus,
+    };
   }
 
   private categorizeFailureReasons(failedResults: SearchResult[]): string[] {
